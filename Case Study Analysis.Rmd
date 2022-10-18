@@ -1,0 +1,368 @@
+---
+title: "Google Data Analytic Certification - Case Study"
+author: "Sasidharan Sathiyamoorthy"
+subtitle: "Analysis of how annual members and casual riders use Cylistic's bikes differently"
+date: "06-10-2022"
+output: html_document
+---
+
+# Installing Packages;
+```{r}
+install.packages(c("tidyverse","lubridate","ggplot2","readr","patchwork"))
+
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(readr)
+library(patchwork)
+```
+Obtaining the working directory to import the data
+```{r}
+getwd()
+```
+
+```{r}
+setwd( "C:/Users/Sasidharan/Desktop/Data Science Projects/GDAC Case Study")
+
+```
+
+# Loading data;
+```{r}
+sep_2021 <- read_csv("202109-divvy-tripdata.csv")
+oct_2021 <- read_csv("202110-divvy-tripdata.csv")
+nov_2021 <- read_csv("202111-divvy-tripdata.csv")
+dec_2021 <- read_csv("202112-divvy-tripdata.csv")
+jan_2022 <- read_csv("202201-divvy-tripdata.csv")
+feb_2022 <- read_csv("202202-divvy-tripdata.csv")
+mar_2022 <- read_csv("202203-divvy-tripdata.csv")
+apr_2022 <- read_csv("202204-divvy-tripdata.csv")
+may_2022 <- read_csv("202205-divvy-tripdata.csv")
+jun_2022 <- read_csv("202206-divvy-tripdata.csv")
+jul_2022 <- read_csv("202207-divvy-tripdata.csv")
+aug_2022 <- read_csv("202208-divvy-tripdata.csv")
+```
+Combining monthly data into one consolidated dataframe : 
+```{r}
+all_data <- bind_rows(sep_2021,oct_2021,nov_2021,dec_2021,jan_2022,feb_2022,mar_2022,apr_2022,may_2022,jun_2022,jul_2022,aug_2022)
+```
+
+```{r}
+colnames(all_data)
+
+```
+There are approximately 5.8 million ride data points, with 13 identifying features for each ride.
+```{r}
+dim(all_data)
+```
+Verifying datatypes of the features : 
+```{r}
+str(all_data)
+```
+Summary statistics of the numerical features :
+```{r}
+summary(all_data)
+```
+
+# Data Cleaning,Transformations;
+
+```{r}
+all_data <- rename(all_data, membership_type = member_casual)
+```
+
+Consistency check on values of categorical columns : 
+
+1.Membership Type
+```{r}
+all_data %>% count(membership_type)
+```
+2.Rideable Type
+```{r}
+all_data %>% count(rideable_type)
+```
+
+Creating a new feature ride_duration, calculated as the difference between end time and start time of ride : 
+```{r}
+
+all_data$ride_duration <- difftime(all_data$ended_at,all_data$started_at)
+
+all_data$ride_duration <- as.numeric(all_data$ride_duration)
+```
+
+
+A quick look at the summary statistics of ride_duration shows the presence of negative time values (minimum), which indicates the presence of erroneous ride data. 
+```{r}
+summary(all_data$ride_duration)
+```
+
+
+Creating additional levels of time granularity using date obtained from the start time of ride. These granular levels will help us later on in the analysis section. 
+```{r}
+
+all_data$date <- as.Date(all_data$started_at)
+all_data$year <- format(as.Date(all_data$started_at),"%Y")
+all_data$month <- format(as.Date(all_data$started_at),"%B")
+all_data$day <- format(as.Date(all_data$started_at),"%d")
+all_data$day_of_week <- format(as.Date(all_data$started_at),"%A")
+all_data$day_type <- ifelse(weekdays(as.Date(all_data$started_at)) %in% c("Saturday", "Sunday"), "Weekend", "Weekday")
+```
+
+Creating a Seasons variable. Chicago has 4 seasons - Winter (Dec,Jan,Feb), Spring(Mar,Apr,May), Summer(Jun,Jul,Aug), Fall(Sep,Oct,Nov)
+
+```{r}
+all_data$season <- 
+  case_when(
+    all_data$month %in% c("December","January","February") ~ "Winter",
+    all_data$month %in% c("March","April","May") ~ "Spring",
+    all_data$month %in% c("September","October","November") ~ "Fall",
+      TRUE ~ "Summer")
+```
+
+
+Removing records which have ride_duration less than 60 seconds and rides which were carried out by the company for quality control checks.
+```{r}
+all_data_v1 <- all_data %>% filter(ride_duration > 60 & start_station_name != "HQ QR")
+```
+
+Creating a order for week (Sunday to Saturday) and month (September-2021 to August-2022 for a period of 12 months).
+```{r}
+all_data_v1$day_of_week <- ordered(all_data_v1$day_of_week, levels=c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"))
+all_data_v1$month <- ordered(all_data_v1$month, levels=c("September", "October", "November", "December", "January", "February", "March", "April", "May", "June", "July", "August"))
+
+all_data_v1$season <- ordered(all_data_v1$season, level = c("Fall","Winter","Spring","Summer"))
+```
+
+
+Verifying data types of all features : 
+```{r}
+str(all_data_v1)
+```
+
+
+# Data Analysis
+
+
+1. Descriptive statistics of the ride_duration.The minimum ride length is 1 min.The mean and median ride lengths are ~ 21 and ~ 11 minutes respectively. The longest ever ride length recorded is ~ 28 days.
+```{r}
+summary(all_data_v1$ride_duration)
+```
+
+2. Creating separate data frames for casual rider and annual member, for ease of analysis.Also creating two different ride profiles (short <= 1day, long > 1 day)
+```{r}
+casual <- all_data_v1 %>% filter(membership_type == "casual")
+member <- all_data_v1 %>% filter(membership_type == "member")
+
+short_rides <- all_data_v1 %>% filter(ride_duration <= 86400)
+long_rides <- all_data_v1 %>% filter(ride_duration > 86400)
+```
+
+
+a.No of rides breakdown (Casual Rider and Annual Member):
+```{r}
+all_data_v1 %>% count(membership_type)
+```
+
+
+b.Summary statistics of ride_duration based on membership type : 
+```{r}
+all_data_v1 %>% group_by(membership_type) %>% summarise(num_of_rides = n(), mean_ride_time_mins = mean(ride_duration)/60, median_ride_time_mins = median(ride_duration)/60, total_ride_hours = sum(ride_duration)/3600)
+```
+
+
+c.Choice of rideable type count, based on membership type:
+```{r}
+table(all_data_v1$membership_type,all_data_v1$rideable_type)
+```
+
+3.Casual Rider Analysis
+
+a.Stats based on day_of_week :
+```{r}
+casual %>% group_by(day_of_week) %>% summarise(num_of_rides = n(), mean_ride_time_mins = mean(ride_duration)/60, median_ride_time_mins = median(ride_duration)/60, total_ride_hours = sum(ride_duration/3600))
+```
+
+
+b. Stats based on day_type(weekend vs weekday):
+```{r}
+casual %>% group_by(day_type) %>% summarise(num_of_rides = n(), mean_ride_time_mins = mean(ride_duration)/60, median_ride_time_mins = median(ride_duration)/60, total_ride_hours = sum(ride_duration/3600))
+```
+
+c. Stats based on month:
+```{r}
+casual %>% group_by(month) %>% summarise(num_of_rides = n(), mean_ride_time_mins = mean(ride_duration)/60, median_ride_time_mins = median(ride_duration)/60, total_ride_hours = sum(ride_duration/3600))
+```
+
+
+4. Annual Member
+
+a.Stats based on day_of_week :
+```{r}
+member %>% group_by(day_of_week) %>% summarise(num_of_rides = n(), mean_ride_time_mins = mean(ride_duration)/60, median_ride_time_mins = median(ride_duration)/60, total_ride_hours = sum(ride_duration/3600))
+```
+
+b.Stats based on day_type(weekend vs weekday):
+```{r}
+member %>% group_by(day_type) %>% summarise(num_of_rides = n(), mean_ride_time_mins = mean(ride_duration)/60, median_ride_time_mins = median(ride_duration)/60, total_ride_hours = sum(ride_duration/3600))
+```
+
+c.Stats based on month:
+```{r}
+member %>% group_by(month) %>% summarise(num_of_rides = n(), mean_ride_time_mins = mean(ride_duration)/60, median_ride_time_mins = median(ride_duration)/60, total_ride_hours = sum(ride_duration/3600))
+```
+
+
+
+# Data Visualization
+
+
+1. Casual Customer vs Annual Member Comparison (Total Number of Rides, Accumulated Ride Time & Mean Ride Duration)
+```{r}
+all_data_v1 %>% group_by(membership_type) %>% summarise(Total_rides = n())%>% mutate(percent = Total_rides/sum(Total_rides)) %>%  ggplot(aes(x=membership_type, y= percent ,fill=membership_type)) + geom_col() + labs(title = "Percentage of total number of rides", y = "Percentage of rides", x = "Membership Type") +  geom_text(aes(label = scales::percent(percent)),position = position_dodge(width = .9),vjust = -0.5,size = 3) + scale_y_continuous(labels = scales::percent) +  theme_bw() + theme(plot.title = element_text(hjust = 0.5))
+```
+```{r}
+all_data_v1 %>% group_by(season,membership_type) %>% summarise(Total_rides = n())%>% mutate(percent = Total_rides/sum(Total_rides)) %>%  ggplot(aes(x=membership_type, y= percent ,fill=membership_type)) + geom_col() + labs(title = "Percentage of total number of rides", y = "Percentage of rides", x = "Membership Type") +  geom_text(aes(label = scales::percent(percent)),position = position_dodge(width = .9),vjust = -0.5,size = 3) + scale_y_continuous(labels = scales::percent) +  theme_bw() + theme(plot.title = element_text(hjust = 0.5)) + facet_grid(~season)
+```
+
+```{r}
+all_data_v1 %>% group_by(season,membership_type) %>% summarise(Total_rides = n())%>%ggplot(aes(x=membership_type, y= Total_rides/100000 ,fill=membership_type)) + geom_col() + labs(title = "Total number of rides by Season", y = "Number of rides (100K)", x = "Membership Type") +  theme_bw() + theme(plot.title = element_text(hjust = 0.5)) + facet_grid(~season)
+```
+
+
+```{r}
+all_data_v1 %>% group_by(membership_type) %>% summarise(Total_ride_hours = sum(ride_duration)/3600/100000)%>% mutate(percent = Total_ride_hours/sum(Total_ride_hours)) %>%  ggplot(aes(x=membership_type, y= percent ,fill=membership_type)) + geom_col(position = "dodge") + labs(title = "Percentage of total accumulated ride duration", y = " Percentage of accumulated ride time", x = "Membership Type") + scale_y_continuous(labels = scales::percent) + geom_text(aes(label = scales::percent(percent)),position = position_dodge(width = .9),vjust = -0.5,size = 3) + theme_bw() + theme(plot.title = element_text(hjust = 0.5))
+```
+```{r}
+all_data_v1 %>% group_by(season,membership_type) %>% summarise(Total_ride_hours = sum(ride_duration)/3600/100000)%>% mutate(percent = Total_ride_hours/sum(Total_ride_hours)) %>%  ggplot(aes(x=membership_type, y= percent ,fill=membership_type)) + geom_col(position = "dodge") + labs(title = "Percentage of total accumulated ride duration", y = " Percentage of accumulated ride time by season", x = "Membership Type") + scale_y_continuous(labels = scales::percent) + geom_text(aes(label = scales::percent(percent)),position = position_dodge(width = .9),vjust = -0.5,size = 3) + theme_bw() + theme(plot.title = element_text(hjust = 0.5)) + facet_grid(~season)
+```
+```{r}
+all_data_v1 %>% group_by(season,membership_type) %>% summarise(Total_ride_hours = sum(ride_duration)/3600/100000)%>%  ggplot(aes(x=membership_type, y= Total_ride_hours ,fill=membership_type)) + geom_col() + labs(title = "Total accumulated ride duration by season", y = " Ride hours (100K)", x = "Membership Type")  + theme_bw() + theme(plot.title = element_text(hjust = 0.5)) + facet_grid(~season)
+```
+
+
+
+
+```{r}
+
+all_data_v1 %>% group_by(membership_type) %>% summarise(mean_ride_duration = round(mean(ride_duration)/60, digits = 2)) %>% ggplot(aes(x=membership_type,y=mean_ride_duration,fill=membership_type)) + geom_col(position = "dodge") + labs(title = "Mean trip duration", y = "Mean Trip Duration (mins)", x = "Membership Type") + theme_bw() + geom_text(aes(label = mean_ride_duration), vjust = -0.25) + theme(plot.title = element_text(hjust = 0.5))
+
+```
+```{r}
+all_data_v1 %>% group_by(season,membership_type) %>% summarise(mean_ride_duration = round(mean(ride_duration)/60, digits = 2)) %>% ggplot(aes(x=membership_type,y=mean_ride_duration,fill=membership_type)) + geom_col(position = "dodge") + labs(title = "Mean trip duration", y = "Mean Trip Duration (mins)", x = "Membership Type") + theme_bw() + geom_text(aes(label = mean_ride_duration), vjust = -0.25) + theme(plot.title = element_text(hjust = 0.5)) + facet_wrap(~season,1)
+```
+
+
+2. Casual vs Annual Members (Daily Basis) 
+```{r}
+all_data_v1 %>% group_by(membership_type,day_of_week) %>% summarise(Number_of_Rides = n()/100000) %>%  ggplot(aes(x=day_of_week,y = Number_of_Rides,fill=membership_type)) + geom_col(position="dodge") + labs(title = "Daily number of rides", y = "No of rides (in 100K)", x = "Day of Week") + theme_bw() + theme(axis.text.x = element_text(angle=90), plot.title = element_text(hjust = 0.5))
+```
+
+
+```{r}
+all_data_v1 %>% group_by(membership_type,day_of_week) %>% summarise(mean_ride_time_mins = mean(ride_duration)/60) %>% ggplot(aes(x=day_of_week,y = mean_ride_time_mins,fill=membership_type)) + geom_col(position = "dodge") + labs(title = "Daily mean trip duration", x = "Day of Week", y = "Mean Trip Duration (Mins)") + theme_bw() +  theme(axis.text.x = element_text(angle=90),  plot.title = element_text(hjust = 0.5))
+```
+
+In comparing the mean trip duration on a day to day basis for the two customer segments, it is observed that annual members tend to have shorter trips with little variation over the week. Using this information we can hypothesize that annual members are largely made up of working professionals and students who take the same route regularly. In contrast, casual riders tend to have longer trips with noticeable variation between weekdays and weekends. We can hypothesize that casual riders tend to be tourists/visitors who take longer trips either by choice or due to lack of familiarity with routes of the region. To test these hypotheses, surveys can be conducted with the two customer segments to better understand their motivations and requirements.
+
+
+
+```{r}
+all_data_v1 %>% group_by(membership_type,day_of_week) %>% summarise(ride_hours = sum(ride_duration/3600)) %>% ggplot(aes(x=day_of_week,y=ride_hours,fill=membership_type)) + geom_col(position = "dodge") + labs(title = " Accumulated Ride Hours(Daily Basis)", x = "Day of Week", y = "Ride Hours") + theme_bw() + theme(axis.text.x = element_text(angle=90), plot.title = element_text(hjust = 0.5))
+```
+Despite registering lesser number of rides on weekdays, casual members are spending more time on their bikes compared to annual members, even on weekdays when annual member ride activity is at its highest.
+
+
+
+3. Casual Riders vs Annual Members (Month wise Comparison)
+
+
+```{r}
+all_data_v1 %>% group_by(membership_type,month) %>% summarise(num_rides = n()/100000) %>% ggplot(aes(x=month,y=num_rides,fill=membership_type)) + geom_col(position ="dodge") + labs(title = "Total number of rides by month (Sep 2021 - Aug 2022)", x = "Month", y = "Number of rides (in 100K)") + theme_bw() + theme(axis.text.x = element_text(angle=90), plot.title = element_text(hjust = 0.5))
+```
+
+Observing monthly number of rides tells us that, ride activity is at its peak in the summer (Jun,Jul,Aug) and the fall (Sep,Oct,Nov) months, with reduced activity in the winter months. While annual members still make significant number of trips in the winter period, casual rider activity is almost negligible. This may tie into the previous hypothesis, that the casual rider demographic majorly constitutes of tourists , who refrain from visiting the region in the colder months and prefer to do so in summer/fall (hence the increased activity).
+
+
+
+```{r}
+all_data_v1 %>% group_by(membership_type,month) %>% summarise(ride_hours = sum(ride_duration/3600)) %>% ggplot(aes(x=month,y=ride_hours,fill=membership_type)) + geom_col(position = "dodge") + labs(title = "Total accumulated ride hours by month (Sep 2021 - Aug 2022)", x = "Month", y = "Ride Hours") + theme_bw() + theme(axis.text.x = element_text(angle=90), plot.title = element_text(hjust = 0.5))
+```
+The total time spent by casual riders on their bikes is greater than annual members, while compared on a monthly basis as well.
+
+
+
+
+3. Casual vs Annual (Choice of Rideable Type)
+```{r}
+all_data_v1 %>% group_by(membership_type,rideable_type) %>% summarise(num_ride = n()) %>% mutate(percent = num_ride/sum(num_ride)) %>% ggplot(aes(x=membership_type,y=percent, fill = rideable_type)) + geom_col(position = "dodge") + labs(title="Choice of rideable (Breakdown by Customer Segment)", x="Membership Type", y = "Number of Rides") +   geom_text(aes(label = scales::percent(percent)),position = position_dodge(width = .9),vjust = -0.5,size = 3) + scale_y_continuous(labels = scales::percent) + theme_bw() + theme( plot.title = element_text(hjust = 0.5))
+```
+
+
+Classic bikes are the most popular choice among both customer segments, followed by the electric bike. Looking at the proportion of ride types in the casual customer segment, we can say that a significant number of rides are carried out via electric bikes, despite not being the outright popular choice.
+
+
+```{r}
+all_data_v1 %>% group_by(season,membership_type,rideable_type) %>% summarise(num_ride = n()) %>% mutate(percent = num_ride/sum(num_ride)) %>% ggplot(aes(x=membership_type,y=percent, fill = rideable_type)) + geom_col(position="dodge") + labs(title="Choice of rideable (Breakdown by Customer Segment)", x="Membership Type", y = "Number of Rides") +   geom_text(aes(label = scales::percent(percent)),position = position_dodge(width = .9),vjust = -0.5,hjust=0.5,size = 2.6) + scale_y_continuous(labels = scales::percent) + theme_bw() + theme(plot.title = element_text(hjust = 0.5)) +facet_grid(~season)
+```
+
+
+```{r}
+all_data_v1 %>% group_by(season,rideable_type) %>% summarise(num_ride = n()) %>% mutate(percent = num_ride/sum(num_ride)) %>% ggplot(aes(x=rideable_type,y=percent, fill = rideable_type)) + geom_col(position="dodge") + labs(title="Rideable percentage by season", x="Rideable type", y = "Number of Rides") +   geom_text(aes(label = scales::percent(percent)),position = position_dodge(width = .9),vjust = -0.5,hjust=0.5,size = 2.6) + scale_y_continuous(labels = scales::percent) + theme_bw() + theme(axis.text.x = element_text(angle=90),plot.title = element_text(hjust = 0.5)) +facet_grid(~season)
+```
+
+
+```{r}
+all_data_v1 %>% group_by(season,rideable_type) %>% summarise(num_ride = n()) %>%  ggplot(aes(x=rideable_type,y=num_ride/100000, fill = rideable_type)) + geom_col(position="dodge") + labs(title="Number of rides by rideable type by season", x="Rideable type", y = "Number of Rides(100K)") + geom_text(aes(label = num_ride),position = position_dodge(width = .9),vjust = -0.5,hjust=0.5,size = 2.6) +  theme_bw() + theme(axis.text.x = element_text(angle=90),plot.title = element_text(hjust = 0.5)) +facet_grid(~season)
+```
+
+```{r}
+all_data_v1 %>% group_by(season,membership_type,rideable_type) %>% summarise(num_ride = n()) %>% ggplot(aes(x=membership_type,y=num_ride/100000, fill = rideable_type)) + geom_col(position="dodge") + labs(title="Choice of rideable by customer type and season", x="Membership Type", y = "Number of Rides (100K)") + theme_bw() + theme(plot.title = element_text(hjust = 0.5)) + facet_grid(~season)
+```
+
+
+
+Extracting hour of day for analysis
+```{r}
+all_data_v1$start_hour <- lubridate::hour(all_data_v1$started_at)
+all_data_v1$end_hour <- lubridate::hour(all_data_v1$ended_at)
+```
+
+```{r}
+all_data_v1 %>% group_by(membership_type,day_type,start_hour) %>% summarise(num_ride = n()) %>% ggplot(aes(x=factor(start_hour),y=num_ride,fill=membership_type)) + geom_col(position = "dodge") + labs(title = "Number of rides by hour of day", x="Hour of day", y = "Number of Rides")  + theme_bw() + facet_wrap(~day_type,2,scale = "free") + theme(axis.text.x = element_text(angle=90), plot.title = element_text(hjust = 0.5))
+```
+
+
+
+```{r}
+all_data_v1 %>% group_by(membership_type,rideable_type) %>% summarise(mean_ride_length = mean(ride_duration/60)) %>% ggplot(aes(x=membership_type,y=mean_ride_length,fill=rideable_type)) + geom_col(position="dodge") + labs(title = "Mean trip duration by rideable type",x="Membership type",y="Mean trip duration (mins)") + geom_text(aes(label = round(mean_ride_length,digits=2)),position = position_dodge(width = .9),vjust = -0.5,size = 3) +  theme_bw() + theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+
+# Key Findings and Recommendations
+
+Objective : Convert more casual riders to annual members via a marketing campaign (On recommendation from financial team that annual members are more profitable)
+
+Findings :
+
+1. Despite registering fewer number of rides, casual customers on average spend longer times on their rides, resulting in higher ride hours compared to annual members. In terms of accumulated ride time,
+2. Ride activity tends to drop significantly in the winter months, with almost no activity from casual riders and reduced activity from annual members. Activity is at it's greatest during the summer months (Jun,Jul,Aug).
+2. Casual riders tend to ride more often on weekends compared to weekdays. Whereas, annual members take more rides during weekdays and less rides during weekends. 
+4. Casual riders on average spend more time on their bikes during the weekend as compared to weekdays. Annual riders more or less spend similar times on their bikes during weekdays and weekends.
+5. Classic bikes seem to be the popular choice among both customer segment, followed by the electric bike. While docked bikes find some level of adaption among casual users, annual members do not prefer to use it all.  
+
+
+Recommendation : 
+
+From the analysis, we have found out that while annual members contribute to more number of rides, casual riders are the majority segment using the ride service in terms of accumulated ride time(64%).This is due to the fact that casual riders on average, take trips that last ~2.5 times an annual member would take. So there is significant potential in the casual rider segment.  However, it is not quite clear from the findings, as to why casual riders behave the way they do (lower activity on weekdays & winter months). One hypothesis is that casual riders are mostly tourists and vistors, and are hence more likely to visit on weekends and during favorable seasons (summer, fall). Although the financial team feels that annual members are more profitable, it would not be advisable to launch a marketing campaign targeted at casual customers without understanding the demographic breakdown.For instance, if the casual rider segment was to majorly consist of tourists like we hypothesized, then they would be less likely to require an annual membership.
+
+1.Hence, it would be better to first study the casual rider customer segment in more detail (via surveys & questionnaires - could be integrated with app itself), to develop a solid understanding of their motivations and needs. Some key questions to ask are : Who they are ? (Student/Working Professional/Tourist), What is stopping them from buying annual membership ? (If resident of the region), How often do they use the service ? Are the pricing options a barrier to conversion ? Age bracket, Purpose of use etc.
+2. Understanding 'WHY' casual customers use the service, can help provide insight into why ride activity follows a particular seasonal pattern.
+
+Future Analysis Ideas:
+1. Create season based analysis and breakdowns, by grouping relevant months together.
+2. Include start and end station geo location data to map areas of highest activity.
+
+
+Getting the csv file for use in Tableau;
+```{r}
+write.csv(all_data_v1,"C:/Users/Sasidharan/Desktop/Data Science Projects/GDAC Case Study/tripdata_clean.csv")
+```
+
